@@ -1,4 +1,12 @@
+# 仮想環境
 .venv/
+__pycache__/
+
+# YOLOv8モデルファイル（拡張子が .pt のものすべて）
 *.pt
-car.jpg
-result.jpg
+
+# テスト用の動画・画像ファイル（拡張子が .mp4, .jpg などのもの）
+*.mp4
+*.jpg
+*.jpeg
+*.png
