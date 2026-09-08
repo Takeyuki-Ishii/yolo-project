@@ -67,33 +67,59 @@ if uploaded_video is not None:
         # 処理中のメッセージ
         st.info("🔄 動画を解析して再生中...（途中で止める場合はブラウザの「Stop」ボタンを押してください）")
 
+        # --- ここから追加：リアルタイムカウンターの表示枠を先に作成 ---
+        st.subheader("📊 現在のリアルタイム検知状況")
+        # 画面を2つの列に分け、自動車用と自転車用のカウンターを横並びにする
+        col1, col2 = st.columns(2)
+        car_metric = col1.metric(label="🚗 自動車 (画面内)", value=0)
+        bike_metric = col2.metric(label="🚲 自転車 (画面内)", value=0)
+        # ---------------------------------------------------------
         # 動画の全フレームをループ処理
         while cap.isOpened():
             ret, frame = cap.read()
             if not ret:
-                break  # 動画が終了したらループを抜ける
-
-            # 【重要】YOLOv8の「追跡機能（track）」を使用します！
-            # model() ではなく model.track() を使うことで、フレーム間で同じ物体に同じIDを割り振ってくれます
-            # persist=True で、前のフレームの記憶を引き継ぎます
+                     break  # 動画が終了したらループを抜ける
+            # YOLOv8の「追跡機能（track）」を使用
             results = model.track(
                 source=frame, 
                 classes=selected_classes, 
                 conf=conf_threshold, 
                 persist=True,
                 verbose=False # ターミナルへの大量のログ出力を非表示にする
-            )
-            
+                )
             result = results[0]
+            # --- ここから追加：現在のフレーム内にいる「車種別の台数」をカウント ---
+            current_car_count = 0
+            current_bike_count = 0
+                            
+            # 検知結果（result.boxes）が存在する場合のみカウント処理を行う
+            if result.boxes is not None and len(result.boxes) > 0:
+                # 画面内のすべての検知オブジェクトのクラスIDを取得
+                # YOLOv8では、クラスIDは浮動小数点数(float)のTensorで返ってくることがあるため、int型に変換します
+                class_ids = result.boxes.cls.int().cpu().tolist()
+        
+                # YOLOv8の標準モデル(COCOデータセット)のクラスID: 
+                # 2 = car（自動車）, 7 = truck（トラック）, 5 = bus（バス）, 1 = bicycle（自転車）
+                # ※もし「自動車」にトラックやバスも含める場合は、7や5もカウント対象にします
+                for cid in class_ids:
+                    if cid in [2, 5, 7]:  # 自動車・バス・トラック
+                        current_car_count += 1
+                    elif cid == 1:       # 自転車
+                        current_bike_count += 1
+
+            # カウンターの数値をリアルタイムに更新（上書き）
+            car_metric.metric(label="🚗 自動車 (画面内)", value=current_car_count)
+            bike_metric.metric(label="🚲 自転車 (画面内)", value=current_bike_count)
+            # -----------------------------------------------------------------
 
             # --- 結果の描画 ---
-            # AIが枠線や追跡ID（予測された番号）を描き込んだ画像を取得
+            # AIが枠線や追跡IDを描き込んだ画像を取得
             annotated_frame = result.plot()
             
             # OpenCVはBGR形式なので、Streamlitで表示するためにRGB形式に変換
             annotated_frame_rgb = cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB)
 
-            # 用意しておいた「空の枠」に現在のフレームの画像を上書き表示（これで動画に見えます）
+            # 用意しておいた「空の枠」に現在のフレームの画像を上書き表示
             frame_placeholder.image(annotated_frame_rgb, use_container_width=True)
 
         # 使い終わった動画ファイルを閉じて、一時ファイルを削除
