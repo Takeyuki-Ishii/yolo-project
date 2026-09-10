@@ -240,6 +240,49 @@ if uploaded_video is not None:
                 st.write(f"🚗 検知された自動車の総数（ユニーク）: {total_unique_cars} 台")
                 st.write(f"🚲 検知された自転車の総数（ユニーク）: {total_unique_bikes} 台")
                 
+                # =================================================================
+                # 【新機能】時間経過ごとの検知台数の推移グラフを表示（秒数丸め＋整数化版）
+                # =================================================================
+                st.subheader("⏱️ 時間経過ごとの検知台数の推移")
+                
+                # 1. 「Time(sec)」列が存在することを確認
+                if "Time(sec)" in df_logs.columns and "Track_ID" in df_logs.columns:
+                    
+                    # --- 【設定変更パーツ】 ---
+                    time_unit = 1.0 
+                    # ---------------------------
+
+                    # 元のデータを壊さないようにコピーを作成
+                    df_chart_prep = df_logs.copy()
+
+                    # 2. 対象のクラス(car, bicycle)だけに絞り込む
+                    df_filtered = df_chart_prep[df_chart_prep["Class"].isin(["car", "bicycle"])]
+                    
+                    if not df_filtered.empty:
+                        # 3. まず「各フレーム（元の細かい時間）」×「クラス」ごとの瞬間検知台数をカウント
+                        df_frame_counts = df_filtered.groupby(["Time(sec)", "Class"])["Track_ID"].nunique().reset_index()
+                        
+                        # 4. 丸めた秒数（新Time(sec)）の列を作成
+                        df_frame_counts["Time_Rounded"] = (df_frame_counts["Time(sec)"] / time_unit).round() * time_unit
+                        
+                        # 5. その区間内の【最大値(max)】を取得し、確実な整数型(.astype(int))に変換
+                        # これにより、「4.0秒の区間で一番多く車が映っていた瞬間（例: 8台）」が採用されます
+                        df_rounded_counts = df_frame_counts.groupby(["Time_Rounded", "Class"])["Track_ID"].max().astype(int)
+                        
+                        # 6. 横軸をTime(sec)、縦軸を各クラスにするために表を整形
+                        df_chart = df_rounded_counts.unstack(level="Class", fill_value=0)
+                        
+                        # インデックス（横軸）の名前をわかりやすく綺麗にする
+                        df_chart.index.name = "Time(sec)"
+
+                        # 7. Streamlitの折れ線グラフを描画
+                        st.line_chart(df_chart)
+                    else:
+                        st.info("グラフを表示するための自動車・自転車のデータが不足しています。")
+                else:
+                    st.error("ログデータに 'Time(sec)' または 'Track_ID' 列が存在しないため、グラフを描画できません。")
+                # =================================================================                # =================================================================
+                
                 # --- レイアウト用のカラムを作成（ボタンを横並び、または縦に綺麗に並べるため） ---
                 col1, col2 = st.columns(2)
                 
