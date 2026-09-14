@@ -3,8 +3,13 @@ import tempfile
 import cv2
 import numpy as np
 import streamlit as st
-import pandas as pd  # 📊 CSV化のために必要です。まだなければインポートしてください
+import pandas as pd  # 📊 CSV化のために必要です。
+import altair as alt
 from ultralytics import YOLO
+# --- 制限値の設定（ポートフォリオの仕様に合わせて自由に変更してください） ---
+MAX_FILE_SIZE_MB = 20 # 読み込みファイルのサイズ制限(MB)
+MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024  # バイト単位に変換
+MAX_VIDEO_DURATION_SEC = 30.0  # 読み込みファイルの長さ制限
 
 # 1. ページの基本設定
 st.set_page_config(page_title="動画物体検知・追跡アプリ", layout="centered")
@@ -49,7 +54,7 @@ st.sidebar.subheader("パフォーマンス設定 (軽量化)")
 frame_skip = st.sidebar.slider(
     "処理するフレーム間隔",
     min_value=1,
-    max_value=5,
+    max_value=6,
     value=3,
     step=1,
     help="数値を大きくすると処理が非常に軽くなりますが、動画の動きが飛び飛びになります（推奨: 3）"
@@ -73,9 +78,12 @@ else:
     target_width = 480
 
 # 4. 動画ファイルアップローダーの配置
-# 【修正】typeを「mp4」に変更
+# アップローダーの直前に小さな文字で注釈を追加
+st.caption("⚠️ **【重要】制限事項：20MB以内、かつ30.0秒以内の動画のみ解析可能です。**")
 uploaded_video = st.file_uploader(
-    "動画ファイル（mp4）をアップロードしてください...", type=["mp4"]
+    "動画ファイル（mp4）をアップロードしてください...", 
+    type=["mp4"],
+    help="サーバー負荷軽減のため、サイズは20MBまで、長さは30.0秒までの制限を設けています。制限を超える動画はアップロード後にエラー表示となります。"
 )
 if uploaded_video:
     # 新しいファイル名がセッションに保存されているものと違う場合、または初めての場合にリセット
@@ -90,6 +98,11 @@ if uploaded_video is not None:
     # 選択されていない場合の警告
     if not selected_classes:
         st.sidebar.warning("⚠️ 検知対象を1つ以上選択してください。")
+    
+    # 【追加】① ファイルサイズの事前チェック
+    elif uploaded_video.size > MAX_FILE_SIZE_BYTES:
+        st.error(f"❌ ファイルサイズが大きすぎます。ポートフォリオ環境保護のため、{MAX_FILE_SIZE_MB}MB以下の動画を選択してください。")
+        
     else:
         # --- 動画の読み込み準備 ---
         # Streamlitが受け取った動画データを、Pythonが読み込めるように一時ファイルとして保存します
@@ -100,11 +113,27 @@ if uploaded_video is not None:
         # OpenCVで動画を開く
         cap = cv2.VideoCapture(tfile.name)
         
-        # 画面にパラパラ漫画を映し出すための「空の枠」を用意
-        frame_placeholder = st.empty()
+        # 【追加】② 動画の長さ（秒数）のチェック
+        # OpenCVのプロパティから「総フレーム数」と「FPS（1秒あたりのフレーム数）」を取得して計算
+        total_frames = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+        fps = cap.get(cv2.CAP_PROP_FPS)
         
-        # 処理中のメッセージ
-        st.info("🔄 動画を解析して再生中...（途中で止める場合はブラウザの「Stop」ボタンを押してください）")
+        # 初期値の安全策（万が一FPSが0などで取得できなかった場合のクラッシュ防止）
+        duration_sec = 0
+        if fps > 0:
+            duration_sec = total_frames / fps
+            
+        if duration_sec > MAX_VIDEO_DURATION_SEC:
+            st.error(f"❌ 動画の長さが長すぎます（現在の動画: {duration_sec:.1f}秒）。サーバー負荷軽減のため、{MAX_VIDEO_DURATION_SEC}秒以内の動画を選択してください。")
+            cap.release()  # キャプチャを解放
+            st.rerun()
+            
+        else:
+            # --- 💡 すべてのチェックをクリアした場合のみ、ここから解析処理が始まります ---
+            # 画面にパラパラ漫画を映し出すための「空の枠」を用意
+            frame_placeholder = st.empty()
+            # 処理中のメッセージ
+            st.info("🔄 動画を解析して再生中...（途中で止める場合はブラウザの「Stop」ボタンを押してください）")
 
         fps = cap.get(cv2.CAP_PROP_FPS)
         if fps == 0 or pd.isna(fps):
@@ -240,43 +269,57 @@ if uploaded_video is not None:
                 st.write(f"🚗 検知された自動車の総数（ユニーク）: {total_unique_cars} 台")
                 st.write(f"🚲 検知された自転車の総数（ユニーク）: {total_unique_bikes} 台")
                 
-                # =================================================================
                 # 【新機能】時間経過ごとの検知台数の推移グラフを表示（秒数丸め＋整数化版）
-                # =================================================================
                 st.subheader("⏱️ 時間経過ごとの検知台数の推移")
                 
                 # 1. 「Time(sec)」列が存在することを確認
                 if "Time(sec)" in df_logs.columns and "Track_ID" in df_logs.columns:
-                    
-                    # --- 【設定変更パーツ】 ---
                     time_unit = 1.0 
-                    # ---------------------------
-
-                    # 元のデータを壊さないようにコピーを作成
                     df_chart_prep = df_logs.copy()
-
-                    # 2. 対象のクラス(car, bicycle)だけに絞り込む
                     df_filtered = df_chart_prep[df_chart_prep["Class"].isin(["car", "bicycle"])]
                     
                     if not df_filtered.empty:
-                        # 3. まず「各フレーム（元の細かい時間）」×「クラス」ごとの瞬間検知台数をカウント
                         df_frame_counts = df_filtered.groupby(["Time(sec)", "Class"])["Track_ID"].nunique().reset_index()
-                        
-                        # 4. 丸めた秒数（新Time(sec)）の列を作成
                         df_frame_counts["Time_Rounded"] = (df_frame_counts["Time(sec)"] / time_unit).round() * time_unit
-                        
-                        # 5. その区間内の【最大値(max)】を取得し、確実な整数型(.astype(int))に変換
-                        # これにより、「4.0秒の区間で一番多く車が映っていた瞬間（例: 8台）」が採用されます
                         df_rounded_counts = df_frame_counts.groupby(["Time_Rounded", "Class"])["Track_ID"].max().astype(int)
                         
-                        # 6. 横軸をTime(sec)、縦軸を各クラスにするために表を整形
-                        df_chart = df_rounded_counts.unstack(level="Class", fill_value=0)
+                        # --- 💡 ここから Altair 用に修正・追加 ---
+                        # 処理をしやすくするため、unstackせずに「縦持ちデータ（Long-form）」のままリセットインデックスします
+                        df_chart_data = df_rounded_counts.reset_index()
+                        df_chart_data.columns = ["Time(sec)", "Class", "Count"] # 列名を分かりやすく整える
+                                                
+                        # 1. クラスごとのカラーマッピングを厳密に定義
+                        # データ内の文字列（"car", "bicycle"）と色（青, 赤）を完全に紐付けます
+                        color_scale = alt.Scale(
+                            domain=["car", "bicycle"],
+                            range=["#0000FF", "#FF0000"]
+                        )
                         
-                        # インデックス（横軸）の名前をわかりやすく綺麗にする
-                        df_chart.index.name = "Time(sec)"
-
-                        # 7. Streamlitの折れ線グラフを描画
-                        st.line_chart(df_chart)
+                        # 2. Altairで折れ線グラフを構築
+                        chart = alt.Chart(df_chart_data).mark_line(strokeWidth=3).encode(
+                            # X軸の設定（タイトルやグリッドを細かく制御可能）
+                            x=alt.X("Time(sec):Q", title="経過時間 (秒)", axis=alt.Axis(grid=True)),
+                            
+                            # Y軸の設定（検知台数、整数のみ表示）
+                            y=alt.Y("Count:Q", title="検知台数 (台)", axis=alt.Axis(format="d")),
+                            
+                            # 線の色（上記で定義したルールを適用）
+                            color=alt.Color("Class:N", title="検知クラス", scale=color_scale),
+                            
+                            # 🔥 ポートフォリオで映える「ホバー（Tooltip）」機能の追加！
+                            # マウスを乗せたときに、秒数・クラス・台数をポップアップ表示します
+                            tooltip=[
+                                alt.Tooltip("Time(sec):Q", title="時間(秒)"),
+                                alt.Tooltip("Class:N", title="対象"),
+                                alt.Tooltip("Count:Q", title="検知台数(台)")
+                            ]
+                        ).properties(
+                            width="container", # 横幅を画面にフィットさせる
+                            height=350         # グラフの高さを指定
+                        ).interactive()        # グラフのマウスドラッグでの拡大・縮小・移動を有効化
+                        
+                        # 3. Streamlitの画面にAltairチャートを表示
+                        st.altair_chart(chart, use_container_width=True)
                     else:
                         st.info("グラフを表示するための自動車・自転車のデータが不足しています。")
                 else:
