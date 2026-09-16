@@ -4,4 +4,3 @@ numpy
 altair
 ultralytics
 opencv-python-headless
-lapx>=0.5.2
