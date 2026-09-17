@@ -5,6 +5,7 @@ import numpy as np
 import streamlit as st
 import pandas as pd
 import altair as alt
+import torch
 from ultralytics import YOLO
 
 # --- 定数・制限値の設定 ---
@@ -93,47 +94,50 @@ def process_video_tracking(video_path: str, selected_classes: list, conf_thresho
             frame = cv2.resize(frame, (target_width, target_height))
 
         # YOLO推論
-        results = model.track(
-            source=frame, 
-            classes=selected_classes, 
-            conf=conf_threshold, 
-            persist=True,
-            verbose=False
-        )
-        result = results[0]
+        with torch.no_grad():
+            results = model.track(
+                source=frame, 
+                classes=selected_classes, 
+                conf=conf_threshold, 
+                persist=True,
+                verbose=False,
+                stream=True  # 追加
+            )
+            for result in results:  # ループで取り出す
 
-        current_car_count = 0
-        current_bike_count = 0
+                current_car_count = 0
+                current_bike_count = 0
 
-        if result.boxes is not None and len(result.boxes) > 0:
-            class_ids = result.boxes.cls.int().cpu().tolist()
-            track_ids = result.boxes.id.int().cpu().tolist() if result.boxes.id is not None else [-1] * len(class_ids)
+                if result.boxes is not None and len(result.boxes) > 0:
+                    class_ids = result.boxes.cls.int().cpu().tolist()
+                    track_ids = result.boxes.id.int().cpu().tolist() if result.boxes.id is not None else [-1] * len(class_ids)
 
-            for cid, tid in zip(class_ids, track_ids):
-                label = ""
-                if cid in [2, 5, 7]:
-                    current_car_count += 1
-                    label = "car"
-                elif cid == 1:
-                    current_bike_count += 1
-                    label = "bicycle"
-                
-                if label != "":
-                    temp_logs.append({
-                        "Frame": frame_count,
-                        "Time(sec)": current_time_sec,
-                        "Track_ID": tid,
-                        "Class": label
-                    })
+                    for cid, tid in zip(class_ids, track_ids):
+                        label = ""
+                        if cid in [2, 5, 7]:
+                            current_car_count += 1
+                            label = "car"
+                        elif cid == 1:
+                            current_bike_count += 1
+                            label = "bicycle"
+                        
+                        if label != "":
+                            temp_logs.append({
+                                "Frame": frame_count,
+                                "Time(sec)": current_time_sec,
+                                "Track_ID": tid,
+                                "Class": label
+                            })
 
-        # メトリクスと映像のリアルタイム更新
-        car_metric.metric(label="🚗 自動車 (画面内)", value=current_car_count)
-        bike_metric.metric(label="🚲 自転車 (画面内)", value=current_bike_count)
+            # メトリクスと映像のリアルタイム更新
+            car_metric.metric(label="🚗 自動車 (画面内)", value=current_car_count)
+            bike_metric.metric(label="🚲 自転車 (画面内)", value=current_bike_count)
 
-        annotated_frame = result.plot()
-        annotated_frame_rgb = cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB)
-        frame_placeholder.image(annotated_frame_rgb, use_container_width=True)
-
+            annotated_frame = result.plot()
+            annotated_frame_rgb = cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB)
+            frame_placeholder.image(annotated_frame_rgb, use_container_width=True)
+        # ループの最後で巨大な画像変数を明示的に削除してメモリを空ける
+        del frame, annotated_frame, annotated_frame_rgb
     cap.release()
     return temp_logs
 
