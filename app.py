@@ -142,9 +142,8 @@ def process_video_tracking(video_path: str, selected_classes: list, conf_thresho
                 frame_placeholder.image(annotated_frame_rgb, use_container_width=True)
             # ループの最後で巨大な画像変数を明示的に削除してメモリを空ける
             del frame, annotated_frame, annotated_frame_rgb
-    finally:  # 👈 途中でエラーが起きても、ブラウザでStopされても必ず実行される
+    finally:  # 途中でエラーが起きても、ブラウザでStopされても必ず実行される
         cap.release()
-        cv2.destroyAllWindows() # 念のためOpenCVのウィンドウバッファも破棄
     return temp_logs
 
 # 5. 📈 グラフ描画・結果表示UI
