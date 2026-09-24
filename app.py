@@ -215,24 +215,11 @@ def main():
     st.title("🎬 動画対応！車・自転車の検知＆追跡アプリ")
     st.write("動画ファイルをアップロードすると、AIがリアルタイムに検知・追跡（トラッキング）を行います。")
 
-    # --- サイドバー設定 ---
-    st.sidebar.header("🛠️ 検知設定")
-    conf_threshold = st.sidebar.slider("確信度のしきい値", min_value=0.1, max_value=1.0, value=0.25, step=0.05)
-    
-    st.sidebar.subheader("📦 検知対象の選択")
-    detect_car = st.sidebar.checkbox("🚗 自動車（トラック含む）", value=True)
-    detect_bicycle = st.sidebar.checkbox("🚲 自転車", value=True)
-
-    selected_classes = []
-    if detect_car: selected_classes.extend([2, 3, 7])
-    if detect_bicycle: selected_classes.append(1)
-
-    st.sidebar.markdown("---")
-    st.sidebar.subheader("パフォーマンス設定 (軽量化)")
-    frame_skip = st.sidebar.slider("処理するフレーム間隔", min_value=1, max_value=6, value=3, step=1, help="推奨: 3")
-    resolution_option = st.sidebar.selectbox("解析画質（動画の横幅）", options=["高画質 (そのまま)", "標準 (640px)", "軽量 (480px)"], index=1)
-
-    target_width = 99999 if resolution_option == "高画質 (そのまま)" else (640 if resolution_option == "標準 (640px)" else 480)
+    # セッション記憶の初期化
+    if "analysis_done" not in st.session_state:
+        st.session_state.analysis_done = False
+    if "tracking_logs" not in st.session_state:
+        st.session_state.tracking_logs = []
 
     # --- ファイルアップローダー ---
     st.caption("⚠️ **【重要】制限事項：20MB以内、かつ30.0秒以内の動画のみ解析可能です。**")
@@ -245,11 +232,39 @@ def main():
             st.session_state.analysis_done = False
             st.session_state.tracking_logs = []
 
-    # セッション記憶の初期化
-    if "analysis_done" not in st.session_state:
-        st.session_state.analysis_done = False
-    if "tracking_logs" not in st.session_state:
-        st.session_state.tracking_logs = []
+    # ★【判定ロジック】「動画が上がっている」かつ「まだ解析が終わっていない」＝『現在解析中』とみなす
+    is_now_processing = (uploaded_video is not None) and (not st.session_state.analysis_done)
+
+    # --- サイドバー設定 ---
+    st.sidebar.header("🛠️ 検知設定")
+    
+    # 解析中（is_now_processing = True）なら自動的に操作不可（disabled）にする
+    conf_threshold = st.sidebar.slider(
+        "確信度のしきい値", min_value=0.1, max_value=1.0, value=0.25, step=0.05,
+        disabled=is_now_processing
+    )
+    
+    st.sidebar.subheader("📦 検知対象の選択")
+    detect_car = st.sidebar.checkbox("🚗 自動車（トラック含む）", value=True, disabled=is_now_processing)
+    detect_bicycle = st.sidebar.checkbox("🚲 自転車", value=True, disabled=is_now_processing)
+
+    selected_classes = []
+    # ※ 元のコードに合わせてクラスID(2, 5, 7)を反映。もし前回のコードで3になっていたら3に戻してください。
+    if detect_car: selected_classes.extend([2, 5, 7])
+    if detect_bicycle: selected_classes.append(1)
+
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("パフォーマンス設定 (軽量化)")
+    frame_skip = st.sidebar.slider(
+        "処理するフレーム間隔", min_value=1, max_value=6, value=3, step=1, help="推奨: 3",
+        disabled=is_now_processing
+    )
+    resolution_option = st.sidebar.selectbox(
+        "解析画質（動画の横幅）", options=["高画質 (そのまま)", "標準 (640px)", "軽量 (480px)"], index=1,
+        disabled=is_now_processing
+    )
+
+    target_width = 99999 if resolution_option == "高画質 (そのまま)" else (640 if resolution_option == "標準 (640px)" else 480)
 
     # --- メインロジック分岐 ---
     if uploaded_video is not None:
@@ -261,7 +276,7 @@ def main():
         if not validate_video_file(uploaded_video):
             return
 
-        # ファイルポインタを先頭に戻す（再解析時の空書き込み対策）
+        # ファイルポインタを先頭に戻す
         uploaded_video.seek(0)
 
         # 一時ファイルへの保存処理
@@ -293,7 +308,6 @@ def main():
             st.rerun()
 
         # 4. 結果表示・ダッシュボードフェーズ
-        # ※「if not ...」と同じインデントレベル（関数 main の直下）に配置します
         if st.session_state.analysis_done:
             df_logs = pd.DataFrame(st.session_state.tracking_logs)
             
