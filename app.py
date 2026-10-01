@@ -139,7 +139,7 @@ def process_video_tracking(video_path: str, selected_classes: list, conf_thresho
 
                 annotated_frame = result.plot()
                 annotated_frame_rgb = cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB)
-                frame_placeholder.image(annotated_frame_rgb, use_container_width=True)
+                frame_placeholder.image(annotated_frame_rgb, width='stretch')
             # ループの最後で巨大な画像変数を明示的に削除してメモリを空ける
             del frame, annotated_frame, annotated_frame_rgb
     finally:  # 途中でエラーが起きても、ブラウザでStopされても必ず実行される
@@ -186,7 +186,7 @@ def display_tracking_dashboard(df_logs: pd.DataFrame):
                 ]
             ).properties(width="container", height=350).interactive()
             
-            st.altair_chart(chart, use_container_width=True)
+            st.altair_chart(chart, width='stretch')
         else:
             st.info("グラフを表示するための自動車・自転車のデータが不足しています。")
     else:
@@ -202,10 +202,10 @@ def display_tracking_dashboard(df_logs: pd.DataFrame):
             data=csv,
             file_name="tracking_results.csv",
             mime="text/csv",
-            use_container_width=True
+            width='stretch'
         )
     with col2:
-        if st.button("🔄 同じ動画で再解析する", use_container_width=True):
+        if st.button("🔄 同じ動画で再解析する", width="stretch"):
             st.session_state.analysis_done = False
             st.session_state.tracking_logs = []
             st.rerun()
@@ -318,7 +318,7 @@ def main():
                 st.write("🚗 検知された自動車の総数: 0 台")
                 st.write("🚲 検知された自転車の総数: 0 台")
                 
-                if st.button("🔄 設定を変えて再解析する", use_container_width=True):
+                if st.button("🔄 設定を変えて再解析する", width="stretch"):
                     st.session_state.analysis_done = False
                     st.session_state.tracking_logs = []
                     st.rerun()
